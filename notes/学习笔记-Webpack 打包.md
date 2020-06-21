@@ -1406,3 +1406,416 @@ yarn webpack --config webpack.prod.js
 }
 ```
 
+
+
+---
+
+#### Webpack 4 优化配置
+
+
+
+##### DefinePlugin
+
+Webpack 内置插件，为代码注入全局成员
+
+在 production 模式下，该插件会默认启用，并向全局注入 process.env.NODE_ENV
+
+```js
+// webpack.config.js
+const webpack = require('webpack')
+
+module.exports = {
+  mode: 'none',
+  entry: './src/main.js',
+  output: {
+    filename: 'bundle.js'
+  },
+  plugins: [
+    new webpack.DefinePlugin({
+      // API_BASE_URL: 'https://api.example.com' // 如果别处引用该值 console.log(API_BASE_URL) ==> console.log(https://api.example.com)
+      // 原因在于该值应该是一个符合要求的 JS 代码片段
+      API_BASE_URL: '"https://api.example.com"' // 或者 JSON.stringify('https://api.example.com')
+    })
+  ]
+}
+```
+
+
+
+##### Tree-shaking
+
+"摇掉"代码中未引用部分——未引用代码（dead-code）
+
+生产模式下会自动开启，打包过程中，会自动优化去除未引用的代码
+
+> Tree-shaking 不是指某个配置选项，而是一组功能搭配使用后的优化效果
+>
+> production 下自动开启
+
+开发模式等其他模式下如果要实现 tree-shaking，应该怎么办？
+
+```js
+// webpack.config.js
+
+module.exports = {
+  mode: 'none',
+  entry: './src/index.js',
+  output: {
+    filename: 'bundle.js'
+  },
+  optimization: {
+    usedExports: true, // 只会导出用到的模块到 webpack 入口函数里
+    minimize: true // 压缩代码，同时会去除未引用代码
+  }
+}
+
+// usedExports 相当于标记未引用代码
+// minimize 相当于剪除这些未引用代码
+```
+
+
+
+##### 合并模块
+
+concatenateModules
+
+```js
+// webpack.config.js
+
+module.exports = {
+  mode: 'none',
+  entry: './src/index.js',
+  output: {
+    filename: 'bundle.js'
+  },
+  optimization: {
+    usedExports: true,
+    concatenateModules: true, // bundle.js 中作为参数传递进去的模块列表数组，一个模块对应一个函数，此时，多个函数会被合并为一个函数，模块被合并
+    minimize: true
+  }
+}
+```
+
+> 尽可能的将所有模块合并输出到一个函数中，既提升了运行效率，又减少了代码体积，该特性又被称为“Scope Hoisting”
+
+
+
+##### Tree-shaking & Babel
+
+搭配 babel 转换代码导致 tree-shaking 失效的问题
+
+- Tree-Shaking 前提是 ES Modules，即由 Webpack 打包的代码必须使用 ESM
+- Webpack 一般交由 Loader 加载模块，Webpack 打包 Loader 加载过来的结果
+- 为了转换代码中的 ES 新特性，一般使用 babel-loader 加载模块、做转换
+- babel-loader 处理过程中，有可能将 ES Modules -> CommonJS
+- `@babel/preset-env` 中也有将 ES Modules 转换为 CommonJS 的插件
+
+此时，webpack 打包时，拿到的代码可能就是 CommonJS 模块的代码，以致 tree-shaking 失效
+
+现状：
+
+Babel-loader 中 injectCaller.js 里对当前环境支持 ESM 已做标记
+
+@babel/preset-env 中据此便不会自动转换 ESM -> CommonJS
+
+webpack 打包时得到的还是 ESM
+
+
+
+测试：
+
+```js
+// webpack.config.js
+
+module.exports = {
+  mode: 'none',
+  module: {
+    rules: [
+      {
+        test: /\.js$/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: [
+              [ '@babel/preset-env', { modules: 'commonjs' } ] // preset-env 强制将 ESM -> CommonJS
+            ]
+          }
+        }
+      }
+    ]
+  },
+  optimization: {
+    usedExports: true
+  }
+}
+
+// 以上便会导致 usedExports 失败，进而 tree-shaking 失效
+
+// 如不确定 loader 是否会自动转换 ESM -> CommonJS
+// 可将 preset 中 modules 设置为 false
+['@babel/preset-env', { modules: false }]
+// 此时，preset-env 不会开启 ESM 转换的插件
+
+```
+
+
+
+##### sideEffects
+
+允许用户通过配置的方式标识代码是否有副作用，从而提高 tree-shaking 的压缩空间
+
+副作用：模块执行时除了导出成员之外所做的事情
+
+一般用于 npm 包标记是否有副作用
+
+```js
+// webpack.config.js
+
+module.exports = {
+  mode: 'none',
+  entry: './src/index.js',
+  output: {
+    filename: 'bundle.js'
+  },
+  optimization: {
+    sideEffects: true // 该特性在 production 模式下自动开启
+  }
+}
+```
+
+开启该特性后，webpack 在打包时便会检查当前代码所属的 package.json 文件中是否有 `"sideEffects": false`，该文件所辖的文件中没有用到的部分都会被 tree-shaking 移除
+
+> package.json 中 `"sideEffects: false"` 会标识当前 package.json 所影响的项目当中所有代码都没有副作用
+
+> 使用该特性的前提：确保代码真的没有副作用，不然会造成误删
+>
+> `@import './index.css'` 这也是副作用代码
+>
+> 在 package.json 中手动标识副作用文件
+>
+> ```json
+> {
+>   "sideEffects": [
+>     "./src/extend.js",
+>     "*.css"
+>   ]
+> }
+> ```
+>
+> 如此，副作用代码则会被打包到 bundle.js 中
+
+
+
+##### 代码分割 Code Splitting
+
+- 所有代码最终都被打包到一起，bundle 体积过大
+- 并不是每个模块在启动时都是必要的
+
+解决方案：
+
+分包，按需加载
+
+- 多入口打包 Multi Entry
+
+  常见于多页应用程序，一个页面对应一个打包入口，公共部分单独提取
+
+  ```js
+  // webpack.config.js
+  const HtmlWebpackPlugin = require('html-webpack-plugin')
+  
+  module.exports = {
+    mode: 'none',
+    entry: {
+      index: './src/index.js',
+      album: './src/album.js'
+    },
+    output: {
+      filename: '[name].bundle.js'
+    },
+    plugins: [
+      new HtmlWebpackPlugin({
+        title: 'Multi Entry',
+        template: './src/index.html',
+        filename: 'index.html',
+        chunks: ['index'] // 生成的 html 中只会注入当前 chunk 的 bundle
+      }),
+      new HtmlWebpackPlugin({
+        title: 'Multi Entry',
+        template: './src/album.html',
+        filename: 'album.index',
+        chunks: ['album'] // 生成的 html 中只会注入当前 chunk 的 bundle
+      })
+    ]
+  }
+  ```
+
+  - 提取公共模块 Split Chunks
+
+    不同入口中肯定会有公共模块
+
+    ```js
+    // webpack.config.js
+    // 在上述的 webpack.config.js 中添加
+    module.exports = {
+      optimization: {
+        splitChunks: {
+          chunks: 'all' // 会将所有公共模块都提取到单独的 bundle
+        }
+      }
+    }
+    ```
+
+    
+
+- 动态导入
+
+  按需加载是指，需要用到某个模块时，再加载这个模块
+
+  而采用动态导入的模块会被自动分包
+
+  使用 `import()` 函数取代 `import from` 静态导入
+
+  单页应用中 react、vue 的路由组件便可使用动态导入
+  
+  - 魔法注释 Magic Comments
+  
+    使用动态导入，打包后分包的文件，文件名 1.bundle.js 可读性降低，不易区分，可使用魔法注释为这些文件命名
+  
+    ```js
+    // 动态导入时添加注释
+    import(/* webpackChunkName: 'posts' */'./posts/posts').then(({ default: posts }) => {
+      // ...
+    })
+    ```
+  
+    打包后文件名为 posts.bundle.js
+  
+    借此，灵活组织动态加载的输出文件
+
+
+
+##### MiniCssExtractPlugin
+
+提取 CSS 到单个文件，实现 css 的按需加载
+
+```shell
+# 安装插件
+yarn add mini-css-extract-plugin --dev
+```
+
+```js
+// webpack.config.js
+const { CleanWebpackPlugin } = require('clean-webpack-plugin')
+const HtmlWebpackPlugin = require('html-webpack-plugin')
+const MiniCssExtractPlugin = require('mini-css-extract-plugin')
+
+module.exports = {
+  mode: 'none',
+  entry: {
+    main: './src/index.js'
+  },
+  output: {
+    filename: '[name].bundle.js'
+  },
+  module: {
+    rules: [
+      {
+        test: /\.css$/,
+        use: [
+          // 'style-loader', // 将样式通过 style 标签注入
+          MiniCssExtractPlugin.loader, // 通过 link 方式引入
+          'css-loader'
+        ]
+      }
+    ]
+  },
+  plugins: [
+    new CleanWebpackPlugin(),
+    new HtmlWebpackPlugin({
+      title: 'Dynamic import',
+      template: './src/index.html',
+      filename: 'index.html'
+    }),
+    new MiniCssExtractPlugin()
+  ]
+}
+```
+
+> 建议：当样式文件超过 150KB 时才考虑这种方式，以减少请求
+
+
+
+##### OptimizeCssAssetsWebpackPlugin
+
+压缩输出的 CSS 文件
+
+在上一小节的基础上，生产模式下，还应对提取出来的样式文件进行压缩，webpack 内置的压缩插件是针对 JS 的
+
+```shell
+# 安装插件
+yarn add optimize-css-assets-webpack-plugin --dev
+```
+
+```js
+// webpack.config.js
+// 在上一小节的基础上
+const OptimizeCssAssetsWebpackPlugin = require('optimize-css-assets-webpack-plugin')
+
+module.exports = {
+  plugins: [
+    new OptimizeCssAssetsWebpackPlugin()
+  ]
+}
+
+// webpack 建议压缩类的插件应该配置在 minimizer 特性开启时启动，以便统一控制
+module.exports = {
+  optimization: {
+    minimizer: [ // 注意：此时 webpack 认为用户要自定义压缩操作，此处配置的压缩插件会覆盖内置的压缩插件，进而可能导致其他类型的代码（例如 JS 代码）不会被压缩
+      // yarn add terser-webpack-plugin --dev
+      // const TerserWebpackPlugin = require('terser-webpack-plugin')
+      new TerserWebpackPlugin(), // JS 压缩
+      new OptimizeCssAssetsWebpackPlugin()
+    ]
+  }
+}
+
+// 如果把压缩插件配置在 plugins 中，无论何种模式该插件都会工作，对相关文件进行压缩，影响效率
+// 如果配置在 minimizer 特性中
+// minimizer 特性在生产模式下会自动开启
+// 而在开发模式下，如果没有指定压缩，启用该特性，则不会进行压缩操作，进而提高开发时的效率
+
+```
+
+
+
+##### 输出文件名 Hash
+
+substitutions
+
+部署前端资源文件时，会启用服务器的静态资源缓存，浏览器也会缓存静态文件资源，以减少重复的请求，提高应用响应速度
+
+鉴于缓存失效时间设定与资源文件更新之间的不确定性，建议生产模式下，文件名使用 Hash
+
+对浏览器而言，相同文件全新的文件名会让浏览器重新请求该资源，进而不用过多关注缓存失效时间的设定
+
+```js
+// webpack.config.js
+module.exports = {
+  output: {
+    filename: '[name]-[hash].bundle.js' // 整个项目级别的，项目中任何文件发生改动，hash 都会变
+    // [name]-[chunkhash].bundle.js 同一路文件的 chunkhash 是相同的，同一路任何文件发生改动，该路chunkhash 改变，同时包括引用该路文件的文件的 chunkhash 也会被动改变
+    // [name]-[contenthash].bundle.js 文件级别，不同的文件便有不同的 hash，文件改动，hash 改变，同时，引用该文件的文件的 hash 也会被动的改变
+  },
+  plugins: [
+    new MiniCssExtractPlugin({
+      filename: '[name]-[hash].bundle.css'
+      // 嫌哈希值太长的话，可以手动指定哈希值长度
+      // [name]-[hash:8].bundle.css
+      // 推荐使用 8 位 contenthash
+    })
+  ]
+}
+
+// contenthash 是用于解决缓存问题的最好方式，精确做到与文件相关的改动 hash
+```
+
