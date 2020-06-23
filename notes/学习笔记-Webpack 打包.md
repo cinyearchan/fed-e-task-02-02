@@ -171,7 +171,7 @@ module.exports = {
   module: {
     rules: [ // css-loader 的作用只是将 css -> js 模块，但最终并没有加载到页面里，需要配合 style-loader 使用
       {
-        test: /.css$/,
+        test: /\.css$/,
         use: [
           'style-loader', // use 顺序为从右往左
           'css-loader'
@@ -214,7 +214,7 @@ module.exports = {
   module: {
     rules: [
       {
-        test: /.css$/,
+        test: /\.css$/,
         use: [
           'style-loader',
           'css-loader'
@@ -258,7 +258,7 @@ yarn add file-loader --dev
   module: {
     rules: [
       {
-        test: /.png$/,
+        test: /\.png$/,
         use: 'file-loader'
       }
     ]
@@ -297,7 +297,7 @@ yarn add url-loader --dev
   module: {
     rules: [
       {
-        test: /.png$/,
+        test: /\.png$/,
         use: 'url-loader'
       }
     ]
@@ -317,7 +317,7 @@ yarn add url-loader --dev
   module: {
     rules: [
       {
-        test: /.png$/,
+        test: /\.png$/,
         use: {
           loader: 'url-loader',
           options: {
@@ -361,7 +361,7 @@ yarn add babel-loader @babel/core @babel/preset-env --dev
   module: {
     rules: [
       {
-        test: /.js$/, // 在处理 js 文件时，便会用 babel-loader 取代默认加载器进行处理
+        test: /\.js$/, // 在处理 js 文件时，便会用 babel-loader 取代默认加载器进行处理
         use: {
           loader: 'babel-loader',
           options: {
@@ -406,7 +406,7 @@ yarn add html-loader --dev
   module: {
     rules: [
       {
-        test: /.html$/,
+        test: /\.html$/,
         use: {
           loader: 'html-loader',
           options: {
@@ -459,7 +459,7 @@ world
 main.js 
 
 ```js
-import html from ‘./about.md’
+import html from './about.md'
 
 console.log(about)
 
@@ -472,7 +472,7 @@ webpack.config.js
   module: {
     rules: [
       {
-        test: /.md$/,
+        test: /\.md$/,
         use: [
           './markdown-loader' // 自定义 markdown 文件加载器
         ]
@@ -517,7 +517,7 @@ webpack.config.js
   module: {
     rules: [
       {
-        test: /.md$/,
+        test: /\.md$/,
         use: [
           'html-loader',
           './markdown-loader'
@@ -746,7 +746,7 @@ module.exports = {
 
 
 
-> 通过在声明周期的钩子中挂载函数实现扩展
+> 通过在生命周期的钩子中挂载函数实现扩展
 
 
 
